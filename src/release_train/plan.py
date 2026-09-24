@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from release_train.cut import CutResult, format_cut_report, plan_cut
 from release_train.manifest import Manifest
-from release_train.milestones import LABEL_COMPAT, LABEL_PINS, milestone_title
+from release_train.milestones import milestone_title
 from release_train.pins import MinorVersion
 from release_train.prepare import PrepareResult, format_prepare_report, plan_prepare
 from release_train.status import TRAIN_PHASES
@@ -82,12 +82,16 @@ def format_train_plan(plan: TrainPlan) -> str:
     lines.append("")
     lines.append("State tracking (GitHub as source of truth):")
     lines.append(f"  Milestone title per repo: `{plan.milestone}`")
-    lines.append(f"  Labels: `{LABEL_PINS}` (pin bumps) / `{LABEL_COMPAT}` (compat fixes)")
+    lines.append(
+        "  Milestones only — no release-scoped labels "
+        "(`release-train/pins` / `release-train/compat` are not used)."
+    )
+    lines.append("  Pin bumps and compat fixes are ordinary train PRs on that milestone.")
     lines.append(
         "  No local state files / sqlite / committed train-status JSON — "
         "status and gating use `gh`."
     )
-    lines.append("  Ensure on each member (plugins + extra): milestone + both labels.")
+    lines.append("  Ensure on each member (plugins + extra): milestone only.")
     lines.append("")
     lines.append("Phases (in order):")
     for i, (name, desc) in enumerate(TRAIN_PHASES, 1):
@@ -96,7 +100,7 @@ def format_train_plan(plan: TrainPlan) -> str:
 
     # Phase 1
     lines.append("--- Phase 1: prepare-pins ---")
-    lines.append(f"Assign pin PRs to milestone `{plan.milestone}` with label `{LABEL_PINS}`.")
+    lines.append(f"Assign pin PRs to milestone `{plan.milestone}` (train PRs; no labels).")
     lines.append(format_prepare_report(plan.prepare))
     lines.append("")
 
@@ -113,14 +117,15 @@ def format_train_plan(plan: TrainPlan) -> str:
         f"({plan.ape_tag}) is on PyPI."
     )
     lines.append(
-        f"Compat PRs use the same milestone `{plan.milestone}` with label `{LABEL_COMPAT}`."
+        f"Compat PRs use the same milestone `{plan.milestone}` "
+        "(no distinguishing labels — they are train PRs)."
     )
     lines.append(
         "Breaking API fixes that must follow the ape cut belong here. "
-        "`prepare --phase compat` may be added later; v1 tracks via milestone + label."
+        "`prepare --phase compat` may be added later; v1 tracks via milestone only."
     )
     lines.append(
-        "Ensure milestone + labels on each member before opening compat PRs "
+        "Ensure the milestone on each member before opening compat PRs "
         "(same convention as prepare-pins)."
     )
     lines.append("")
@@ -128,8 +133,8 @@ def format_train_plan(plan: TrainPlan) -> str:
     # Phase 4
     lines.append("--- Phase 4: cut-plugins ---")
     lines.append(
-        "Prerequisite: prepare-pins merged; no open "
-        f"`{LABEL_COMPAT}` PRs on `{plan.milestone}` (cut --apply refuses otherwise)."
+        "Prerequisite: prepare-pins merged; no open PRs on "
+        f"`{plan.milestone}` (cut --apply refuses otherwise)."
     )
     lines.append(format_cut_report(plan.cut_plugins))
     lines.append("")

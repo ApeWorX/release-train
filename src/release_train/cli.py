@@ -39,7 +39,7 @@ def plan(
     """Print the full multi-phase train sequence (always a plan; never mutates).
 
     Phases: prepare-pins → cut-ape → compat → cut-plugins.
-    State lives in per-repo GitHub milestones + labels (not local files).
+    State lives in per-repo GitHub milestones only (no release-scoped labels).
     """
     try:
         mf = load_manifest(manifest)
@@ -58,8 +58,7 @@ def prepare(
         Parameter(
             name="--apply",
             help=(
-                "Ensure milestones/labels via gh; print PR recipes "
-                "(partial in v1). Default: plan only."
+                "Ensure milestones via gh; print PR recipes (partial in v1). Default: plan only."
             ),
         ),
     ] = False,
@@ -100,7 +99,7 @@ def status(
         Parameter(name="--offline", help="Skip gh network calls"),
     ] = False,
 ) -> None:
-    """Show phases, tags, and per-repo milestone progress (pins/compat open counts)."""
+    """Show phases, tags, and per-repo milestone progress (open vs closed PR counts)."""
     try:
         mf = load_manifest(manifest)
     except ManifestError as exc:
@@ -119,7 +118,7 @@ def cut(
             help=(
                 "What to release: ape | plugins | all. "
                 "For plugins: refuses --apply if any member has open "
-                "release-train/compat PRs on the train milestone."
+                "PRs on the train milestone."
             ),
         ),
     ],
@@ -143,7 +142,7 @@ def cut(
     """Create GitHub Releases with --generate-notes (ape first, then plugins).
 
     Default is a plan. Pass --apply to execute. Plugin cuts are gated on the
-    per-repo milestone: open ``release-train/compat`` PRs refuse --apply.
+    per-repo milestone: any open PRs refuse --apply.
     """
     try:
         mf = load_manifest(manifest)

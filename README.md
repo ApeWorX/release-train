@@ -22,29 +22,29 @@ Manifest: [`train.yaml`](train.yaml) (org, core, plugins, optional `extra`, poli
 ## Train state on GitHub (source of truth)
 
 Train / compat progress is **not** stored in local files, sqlite, or committed JSON.
-It lives on each train member repo via:
+It lives on each train member repo via **milestones only** (no release-scoped labels):
 
 | Convention | Value |
 |------------|--------|
 | Milestone title | `release-train/{minor}` — e.g. `release-train/0.9` (minor string as you pass it) |
-| Pin-bump PRs | Label `release-train/pins` + the milestone above |
-| Compat PRs | Label `release-train/compat` + the **same** milestone |
-| Personal / `extra` | Same milestone title and labels on **their** `owner/repo` |
+| Train PRs | All pin bumps and compat / breaking-API fixes for that minor are assigned to the milestone |
+| Labels | **Not used** — do not create `release-train/pins` or `release-train/compat` |
+| Personal / `extra` | Same milestone title on **their** `owner/repo` |
 
 `status` and cut gating query this via `gh`. Use `--offline` / plan mode when network is unavailable (status degrades gracefully; cut prints what would be checked).
 
-`prepare --apply` ensures the milestone and both labels exist on each plugin/extra (via `gh api` / `gh label`) when `gh` is available; PR create remains recipe-based in v1 and includes `--milestone` / `--label`.
+`prepare --apply` ensures the milestone exists on each plugin/extra (via `gh api`) when `gh` is available; PR create remains recipe-based in v1 and includes `--milestone` only.
 
 ## Train phases (minor / breaking)
 
 A coordinated minor follows this lifecycle:
 
-1. **prepare-pins** — open/plan PRs that only bump `eth-ape` pins (milestone + `release-train/pins`; may open before ape is cut; often draft until ape ships)
+1. **prepare-pins** — open/plan PRs that only bump `eth-ape` pins (assigned to the milestone; may open before ape is cut; often draft until ape ships)
 2. **cut-ape** — GitHub Release for ape at the computed train tag
-3. **compat** — gated window: land breaking-API fix PRs **after** ape `X.Y` is on PyPI (same milestone + `release-train/compat`)
-4. **cut-plugins** — release official plugins **and** extras only after pins are merged (+ compat as needed). `--apply` **refuses** (exit non-zero) if any member still has open `release-train/compat` PRs on the milestone; open pin PRs warn.
+3. **compat** — gated window: land breaking-API fix PRs **after** ape `X.Y` is on PyPI (same milestone; ordinary train PRs)
+4. **cut-plugins** — release official plugins **and** extras only after pins are merged (+ compat as needed). `--apply` **refuses** (exit non-zero) if any member still has **any** open PRs on the milestone.
 
-Use `release-train plan --minor 0.9` to print the full sequence (including “ensure milestone + labels on each member”) without mutating anything.
+Use `release-train plan --minor 0.9` to print the full sequence (including “ensure milestone on each member”) without mutating anything.
 
 ## Personal / out-of-org plugins (`extra`)
 
@@ -89,16 +89,16 @@ release-train plan --minor 0.9
 release-train plan --minor 0.9 --offline
 ```
 
-Prints prepare-pins → cut-ape → compat → cut-plugins for the minor, plus the milestone/label convention. Never mutates.
+Prints prepare-pins → cut-ape → compat → cut-plugins for the minor, plus the milestone-only convention. Never mutates.
 
 ### `prepare` — bump eth-ape pins for a minor
 
 ```bash
 release-train prepare --minor 0.9
-release-train prepare --minor 0.9 --apply   # ensure milestone/labels; print PR recipes
+release-train prepare --minor 0.9 --apply   # ensure milestone; print PR recipes
 ```
 
-For each official plugin **and** extra: plan a PR that rewrites `eth-ape>=…` to the train pin (channel follows ape’s computed tag), assigned to `release-train/{minor}` with `release-train/pins`. Also prints an ape `fallback_version` bump reminder (setuptools_scm).
+For each official plugin **and** extra: plan a PR that rewrites `eth-ape>=…` to the train pin (channel follows ape’s computed tag), assigned to `release-train/{minor}` (no labels). Also prints an ape `fallback_version` bump reminder (setuptools_scm).
 
 ### `status` — train health + milestone progress
 
@@ -107,7 +107,7 @@ release-train status --minor 0.9
 release-train status --minor 0.9 --offline
 ```
 
-Shows the four phases, latest tags, and per-member milestone progress (`pins open N / compat open M`, optional due date) when `gh` is available. Offline: prints that network is required for milestone status.
+Shows the four phases, latest tags, and per-member milestone progress (`open N / closed M (total T)`, optional due date) when `gh` is available. Offline: prints that network is required for milestone status.
 
 ### `cut` — create GitHub Releases
 
@@ -119,7 +119,7 @@ release-train cut --target all --minor 0.9 --apply
 
 Order for `all`: ape first, then official plugins, then extras. Each repo gets its **own** computed tag (not a blanket `v0.9.0`). Uses `gh release create … --generate-notes`. Per-repo `publish.yaml` handles PyPI.
 
-**Gate:** `cut --target plugins` (and `all`) checks each train member’s milestone. Open `release-train/compat` PRs → refuse `--apply` (non-zero exit). Open `release-train/pins` PRs → warning only. Plan/dry-run still prints the checks.
+**Gate:** `cut --target plugins` (and `all`) checks each train member’s milestone. Any open PRs on the milestone → refuse `--apply` (non-zero exit). Plan/dry-run still prints the checks.
 
 ## Layout
 
@@ -130,8 +130,8 @@ src/release_train/
   manifest.py              # load/validate train.yaml
   pins.py                  # eth-ape pin rewrite
   tags.py                  # semver tags + release channel
-  milestones.py            # title/label helpers + gating pure logic
-  github.py                # thin gh wrappers (api, labels, milestones, PRs)
+  milestones.py            # title helpers + gating pure logic
+  github.py                # thin gh wrappers (api, milestones, PRs)
   plan.py / prepare.py / status.py / cut.py
 ```
 
@@ -146,5 +146,5 @@ python -m release_train --help
 
 ## TODOs (apply-mode)
 
-- Full fork/branch/commit/PR flow for `prepare --apply` (v1 ensures milestone/labels + prints exact `gh` commands; rewrites pins locally when a checkout path is given)
-- Optional: `prepare --phase compat` to open/label compat PRs onto the same milestone
+- Full fork/branch/commit/PR flow for `prepare --apply` (v1 ensures milestone + prints exact `gh` commands; rewrites pins locally when a checkout path is given)
+- Optional: `prepare --phase compat` to open compat PRs onto the same milestone

@@ -14,8 +14,6 @@ from release_train.github import (
 )
 from release_train.manifest import Manifest, RepoRef
 from release_train.milestones import (
-    LABEL_COMPAT,
-    LABEL_PINS,
     CutGateResult,
     finalize_cut_gate,
     milestone_counts_from_payload,
@@ -62,20 +60,20 @@ def _evaluate_plugin_gate(
     apply: bool,
     skip_network: bool,
 ) -> CutGateResult:
-    """Check open pins/compat PRs on the train milestone for each plugin/extra."""
+    """Check for any open PRs on the train milestone for each plugin/extra."""
     gate = CutGateResult()
     ms = milestone_title(minor)
     online = gh_available() and not skip_network
 
     gate.checks.append(
-        f"Gate: for each plugin/extra, query milestone `{ms}` for open PRs "
-        f"labeled `{LABEL_COMPAT}` (block --apply) / `{LABEL_PINS}` (warn)."
+        f"Gate: for each plugin/extra, query milestone `{ms}` for any open PRs "
+        "(block --apply if open > 0)."
     )
 
     if not online:
         gate.checks.append("Network skipped or gh unavailable — gate not evaluated against GitHub.")
         gate.warnings.append(
-            "WARNING: compat gate not checked (offline / no gh). "
+            "WARNING: milestone open-PR gate not checked (offline / no gh). "
             "Re-run without --offline before --apply when possible."
         )
         return finalize_cut_gate(gate, apply=apply)
@@ -114,9 +112,9 @@ def plan_cut(
     *latest_tags* maps ``owner/repo`` → latest tag (for tests / offline). When
     omitted and network is available, tags are fetched via ``gh``.
 
-    For ``plugins`` / ``all``, evaluates the milestone compat gate. ``--apply``
-    is refused (``blocked=True``) when any member has open ``release-train/compat``
-    PRs on the train milestone.
+    For ``plugins`` / ``all``, evaluates the milestone open-PR gate. ``--apply``
+    is refused (``blocked=True``) when any member has open PRs on the train
+    milestone.
     """
     members: list[RepoRef] = []
     if target in ("ape", "all"):
@@ -136,7 +134,7 @@ def plan_cut(
         warnings.append(
             "WARNING: cut --target plugins assumes prepare-pins are merged and any "
             "compat PRs that must land AFTER ape is on PyPI are already merged. "
-            "Check `release-train status --minor …` / the compat phase before applying."
+            "Check `release-train status --minor …` before applying."
         )
         gate = _evaluate_plugin_gate(manifest, minor, apply=apply, skip_network=skip_network)
         warnings.extend(gate.warnings)
@@ -193,7 +191,7 @@ def format_cut_report(result: CutResult) -> str:
     if result.milestone:
         lines.append(
             f"Milestone gate: `{result.milestone}` "
-            f"(block on open `{LABEL_COMPAT}`; warn on open `{LABEL_PINS}`)."
+            "(block --apply if any open PRs remain on the milestone)."
         )
         lines.append("")
     if result.gate_checks:
@@ -206,7 +204,7 @@ def format_cut_report(result: CutResult) -> str:
         lines.append("")
     if result.blocked:
         lines.append(
-            "No releases were created. Resolve open compat PRs (or close them), "
+            "No releases were created. Land or close all open milestone PRs, "
             "then re-run cut --apply."
         )
         lines.append("")
@@ -221,5 +219,5 @@ def format_cut_report(result: CutResult) -> str:
         lines.append("Re-run with --apply to execute these gh release create commands.")
     elif result.blocked:
         lines.append("")
-        lines.append("(--apply was refused due to the milestone compat gate.)")
+        lines.append("(--apply was refused due to the milestone open-PR gate.)")
     return "\n".join(lines)

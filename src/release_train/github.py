@@ -8,16 +8,7 @@ import subprocess
 from dataclasses import dataclass
 from typing import Any
 
-from release_train.milestones import (
-    LABEL_COMPAT,
-    LABEL_COMPAT_COLOR,
-    LABEL_COMPAT_DESCRIPTION,
-    LABEL_PINS,
-    LABEL_PINS_COLOR,
-    LABEL_PINS_DESCRIPTION,
-    find_milestone_in_list,
-    train_labels,
-)
+from release_train.milestones import find_milestone_in_list
 from release_train.tags import pick_latest_semver
 
 
@@ -129,7 +120,7 @@ def list_open_prs(repo_full: str, search: str | None = None) -> list[dict[str, A
         "--state",
         "open",
         "--json",
-        "number,title,url,headRefName,labels,milestone",
+        "number,title,url,headRefName,milestone",
         "--limit",
         "50",
     ]
@@ -218,93 +209,11 @@ def ensure_milestone(
     return created, lines
 
 
-def list_label_names(repo_full: str) -> set[str]:
-    """Return label names on the repo."""
-    try:
-        result = run_gh(
-            "label",
-            "list",
-            "--repo",
-            repo_full,
-            "--json",
-            "name",
-            "--limit",
-            "100",
-            check=False,
-        )
-        if result.returncode != 0 or not result.stdout.strip():
-            return set()
-        data = json.loads(result.stdout)
-        if not isinstance(data, list):
-            return set()
-        return {str(x["name"]) for x in data if isinstance(x, dict) and x.get("name")}
-    except (GhError, json.JSONDecodeError):
-        return set()
-
-
-def ensure_label(
-    repo_full: str,
-    name: str,
-    *,
-    color: str,
-    description: str,
-    apply: bool = False,
-) -> list[str]:
-    """Ensure a label exists. On apply, create via ``gh label create`` if absent."""
-    lines: list[str] = []
-    existing = list_label_names(repo_full)
-    if name in existing:
-        lines.append(f"# label already present on {repo_full}: {name!r}")
-        return lines
-
-    recipe = (
-        f'gh label create "{name}" --repo {repo_full} --color {color} --description "{description}"'
-    )
-    if not apply:
-        lines.append(f"# create label if absent on {repo_full}")
-        lines.append(recipe)
-        return lines
-
-    run_gh(
-        "label",
-        "create",
-        name,
-        "--repo",
-        repo_full,
-        "--color",
-        color,
-        "--description",
-        description,
-    )
-    lines.append(f"# created label on {repo_full}: {name!r}")
-    return lines
-
-
-def ensure_train_labels(repo_full: str, *, apply: bool = False) -> list[str]:
-    """Ensure both ``release-train/pins`` and ``release-train/compat`` labels."""
-    lines: list[str] = []
-    for name, color, desc in train_labels():
-        lines.extend(ensure_label(repo_full, name, color=color, description=desc, apply=apply))
-    return lines
-
-
-def ensure_milestone_and_labels(
-    repo_full: str,
-    title: str,
-    *,
-    apply: bool = False,
-) -> list[str]:
-    """Ensure train milestone + both labels; return log / recipe lines."""
-    _, ms_lines = ensure_milestone(repo_full, title, apply=apply)
-    label_lines = ensure_train_labels(repo_full, apply=apply)
-    return [*ms_lines, *label_lines]
-
-
 def list_open_prs_on_milestone(
     repo_full: str,
     milestone_title: str,
 ) -> list[dict[str, Any]]:
-    """List open PRs assigned to a milestone (by title), with labels."""
+    """List open PRs assigned to a milestone (by title)."""
     # GitHub search: milestone:"title"
     search = f'milestone:"{milestone_title}"'
     prs = list_open_prs(repo_full, search=search)
@@ -321,7 +230,7 @@ def list_open_prs_on_milestone(
             "--state",
             "open",
             "--json",
-            "number,title,url,headRefName,labels,milestone",
+            "number,title,url,headRefName,milestone",
             "--limit",
             "50",
             check=False,
@@ -351,41 +260,22 @@ def recipe_ensure_milestone(repo_full: str, title: str) -> str:
     )
 
 
-def recipe_ensure_label(repo_full: str, name: str, color: str, description: str) -> str:
-    return (
-        f'gh label create "{name}" --repo {repo_full} --color {color} --description "{description}"'
-    )
-
-
 def recipe_pr_create_with_milestone(
     *,
     repo_full: str,
     head: str,
     title: str,
     milestone: str,
-    label: str,
     body: str,
 ) -> str:
-    """Exact ``gh pr create`` including milestone + label."""
+    """Exact ``gh pr create`` including milestone (no release-scoped labels)."""
     # Body via heredoc keeps multiline safe in printed recipes.
     return (
         f"gh pr create --repo {repo_full} --head {head} "
         f'--title "{title}" '
         f'--milestone "{milestone}" '
-        f'--label "{label}" '
         f"--body-file - <<'EOF'\n{body}\nEOF"
     )
-
-
-# Re-export label constants for callers that import from github
-__all_labels__ = (
-    LABEL_PINS,
-    LABEL_COMPAT,
-    LABEL_PINS_COLOR,
-    LABEL_COMPAT_COLOR,
-    LABEL_PINS_DESCRIPTION,
-    LABEL_COMPAT_DESCRIPTION,
-)
 
 
 @dataclass

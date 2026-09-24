@@ -13,8 +13,6 @@ from release_train.github import (
 )
 from release_train.manifest import Manifest, RepoRef
 from release_train.milestones import (
-    LABEL_COMPAT,
-    LABEL_PINS,
     MilestonePRCounts,
     milestone_counts_from_payload,
     milestone_title,
@@ -142,9 +140,7 @@ def format_status_report(report: StatusReport) -> str:
         if report.network_required_note:
             lines.append(report.network_required_note)
     elif report.milestone:
-        lines.append(
-            f"Milestone: `{report.milestone}`  |  labels: `{LABEL_PINS}` / `{LABEL_COMPAT}`"
-        )
+        lines.append(f"Milestone: `{report.milestone}` (milestones only — no train labels)")
         lines.append("State lives on GitHub (no local train-status files).")
     else:
         lines.append("Tip: pass --minor X.Y to query per-repo milestone progress.")
@@ -174,22 +170,11 @@ def format_status_report(report: StatusReport) -> str:
             presence = "present" if counts.found else "absent"
             lines.append(f"  milestone: {counts.milestone_title or report.milestone} ({presence})")
             lines.append(
-                f"  progress: pins open {counts.pins_open} / compat open {counts.compat_open}{due}"
+                f"  progress: open {counts.open_count} / closed {counts.closed_count} "
+                f"(total {counts.total}){due}"
             )
-            if counts.other_open:
-                lines.append(f"  other open on milestone: {counts.other_open}")
             for pr in st.prepare_prs:
-                labels = pr.get("labels") or []
-                label_names = []
-                for lab in labels:
-                    if isinstance(lab, dict) and lab.get("name"):
-                        label_names.append(str(lab["name"]))
-                    elif isinstance(lab, str):
-                        label_names.append(lab)
-                lab_s = ",".join(label_names) if label_names else "—"
-                lines.append(
-                    f"  open PR #{pr.get('number')}: {pr.get('title')} [{lab_s}] ({pr.get('url')})"
-                )
+                lines.append(f"  open PR #{pr.get('number')}: {pr.get('title')} ({pr.get('url')})")
         elif (
             not report.offline
             and not st.error
