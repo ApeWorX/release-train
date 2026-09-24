@@ -2,27 +2,35 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
-from release_train.github import gh_available
-from release_train.manifest import Manifest
+from release_train.github import gh_available, latest_semver_tag
+from release_train.manifest import Manifest, RepoRef
 from release_train.pins import MinorVersion, format_eth_ape_pin, rewrite_eth_ape_pin
+from release_train.tags import ReleaseChannel, channel_from_latest
 
 
 @dataclass
 class PreparePlanItem:
-    repo: str
-    repo_full: str
+    member: RepoRef
     new_pin: str
     branch: str
     pr_title: str
-    notes: list[str]
+    notes: list[str] = field(default_factory=list)
+
+    @property
+    def repo(self) -> str:
+        return self.member.repo
+
+    @property
+    def repo_full(self) -> str:
+        return self.member.full_name
 
     def gh_commands(self) -> list[str]:
         """Exact ``gh`` / git commands an operator can run (apply is partial in v1)."""
         return [
-            f"# --- {self.repo_full} ---",
+            f"# --- {self.repo_full} ({self.member.kind_label}) ---",
             f"gh repo clone {self.repo_full} /tmp/{self.repo} -- --depth 1",
             f"cd /tmp/{self.repo}",
             f"git checkout -b {self.branch}",
@@ -55,6 +63,7 @@ class PrepareResult:
     items: list[PreparePlanItem]
     ape_reminder: str
     apply: bool
+    channel: ReleaseChannel
     apply_partial: bool = True  # v1: pin helpers + printed gh commands only
 
 
@@ -63,29 +72,52 @@ def plan_prepare(
     minor: MinorVersion,
     *,
     apply: bool = False,
+    channel: ReleaseChannel | None = None,
+    core_latest_tag: str | None = None,
+    skip_network: bool = False,
 ) -> PrepareResult:
-    new_pin = format_eth_ape_pin(minor)
+    """Plan pin-bump PRs for official plugins + extras.
+
+    Pin lower bound follows the core ape *release channel*: if ape's next tag
+    for this minor is a pre-release (e.g. ``v0.9.0a0``), pins use
+    ``>=0.9.0a0,<0.10``; otherwise the stable ``>=0.9.0,<0.10``.
+    """
+    if channel is None:
+        latest = core_latest_tag
+        if latest is None and not skip_network and gh_available():
+            latest = latest_semver_tag(manifest.core_ref.full_name)
+        channel = channel_from_latest(latest, minor)
+
+    new_pin = format_eth_ape_pin(minor, channel=channel)
     branch = f"release-train/eth-ape-{minor.display()}"
     pr_title = f"chore: bump eth-ape pin for {minor.display()} train"
     items: list[PreparePlanItem] = []
-    for plugin in manifest.plugins:
+    for member in manifest.plugin_members:
+        notes = [
+            f"Target pin: `{new_pin}`",
+            f"Member kind: {member.kind_label}",
+            "Upper-bound policy: next minor (not `<1`).",
+            f"Channel: {channel.display()}",
+        ]
+        if channel.pre_label:
+            notes.append(
+                f"Core ape cut is pre-release ({channel.pre_label}0); "
+                "pin lower bound includes the pre-release marker."
+            )
         items.append(
             PreparePlanItem(
-                repo=plugin,
-                repo_full=manifest.full_name(plugin),
+                member=member,
                 new_pin=new_pin,
                 branch=branch,
                 pr_title=pr_title,
-                notes=[
-                    f"Target pin: `{new_pin}`",
-                    "Upper-bound policy: next minor (not `<1`).",
-                ],
+                notes=notes,
             )
         )
 
     ape_reminder = (
-        f"Reminder: bump `fallback_version` in {manifest.full_name(manifest.core.repo)} "
-        f"pyproject.toml (setuptools_scm) toward {minor.display()}.0 before cutting ape."
+        f"Reminder: bump `fallback_version` in {manifest.core_ref.full_name} "
+        f"pyproject.toml (setuptools_scm) toward {channel.default_tag().lstrip('v')} "
+        f"before cutting ape."
     )
 
     result = PrepareResult(
@@ -93,6 +125,7 @@ def plan_prepare(
         items=items,
         ape_reminder=ape_reminder,
         apply=apply,
+        channel=channel,
         apply_partial=True,
     )
 
@@ -103,10 +136,15 @@ def plan_prepare(
     return result
 
 
-def rewrite_checkout_pin(pyproject_path: Path, minor: MinorVersion) -> tuple[str, int]:
+def rewrite_checkout_pin(
+    pyproject_path: Path,
+    minor: MinorVersion,
+    *,
+    channel: ReleaseChannel | None = None,
+) -> tuple[str, int]:
     """Rewrite pins in a local pyproject.toml; returns (new_text, n). Writes the file."""
     original = pyproject_path.read_text(encoding="utf-8")
-    new_text, n = rewrite_eth_ape_pin(original, minor)
+    new_text, n = rewrite_eth_ape_pin(original, minor, channel=channel)
     if n:
         pyproject_path.write_text(new_text, encoding="utf-8")
     return new_text, n
@@ -114,15 +152,22 @@ def rewrite_checkout_pin(pyproject_path: Path, minor: MinorVersion) -> tuple[str
 
 def format_prepare_report(result: PrepareResult) -> str:
     lines: list[str] = []
-    mode = "APPLY (partial)" if result.apply else "DRY-RUN"
+    mode = "APPLY" if result.apply else "PLAN (no changes)"
     lines.append(f"== prepare {result.minor.display()} [{mode}] ==")
+    lines.append("Phase: prepare-pins")
     lines.append(result.ape_reminder)
     lines.append("")
-    lines.append(f"Plugins to update: {len(result.items)}")
-    lines.append(f"New pin: {format_eth_ape_pin(result.minor)}")
+    n_official = sum(1 for i in result.items if i.member.role == "plugin")
+    n_extra = sum(1 for i in result.items if i.member.role == "extra")
+    lines.append(
+        f"Members to update: {len(result.items)} "
+        f"({n_official} official plugin(s), {n_extra} extra/personal)"
+    )
+    lines.append(f"New pin: {format_eth_ape_pin(result.minor, channel=result.channel)}")
+    lines.append(f"Channel: {result.channel.display()}")
     lines.append("")
     for item in result.items:
-        lines.append(f"  • {item.repo_full}")
+        lines.append(f"  • {item.repo_full}  [{item.member.kind_label}]")
         lines.append(f"      branch: {item.branch}")
         lines.append(f"      title:  {item.pr_title}")
         lines.append(f"      pin:    {item.new_pin}")

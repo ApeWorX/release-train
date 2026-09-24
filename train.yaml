@@ -3,12 +3,23 @@
 # Version policy:
 #   - Plugin major.minor tracks ape (eth-ape) major.minor
 #   - Patches float independently
-#   - Plugins pin: eth-ape>=X.Y.0,<X.(Y+1)
+#   - Plugins pin: eth-ape>=X.Y.0,<X.(Y+1)  (stable train)
+#   - If core ape cut is a pre-release (e.g. v0.9.0a0), pins use
+#     eth-ape>=0.9.0a0,<0.10 (same pre-release channel, counter 0)
 #   - Example for minor 0.9: eth-ape>=0.9.0,<0.10
 #
 # Core package on PyPI is "eth-ape"; GitHub repo is ApeWorX/ape.
 # Releases are cut via GitHub Releases (--generate-notes). PyPI publish
 # is handled by each repo's existing publish.yaml on release: released.
+#
+# Train phases for a minor (breaking) release:
+#   1. prepare-pins — PRs that only bump eth-ape pins (often draft until ape ships)
+#   2. cut-ape      — GitHub Release for ape at the train tag
+#   3. compat       — land breaking-API fix PRs AFTER ape X.Y is on PyPI
+#   4. cut-plugins  — release official + extra plugins after pins (+ compat) land
+#
+# Members outside the default org go under `extra:` (still in the train).
+# Bare names use `org:`; `owner/repo` strings or {owner, repo} mappings are ok.
 
 org: ApeWorX
 
@@ -53,6 +64,15 @@ plugins:
   - ape-trezor
   - ape-vyper
 
+# Personal / out-of-org plugins (same prepare/cut/status flow; labeled extra/personal).
+# Examples (do not invent real names here — add your own):
+#   extra:
+#     - someuser/ape-example
+#     - owner: anotheruser
+#       repo: ape-other
+extra: []
+
 policy:
   pin_pattern: "eth-ape>={major}.{minor}.0,<{major}.{next_minor}"
   # next_minor = minor + 1 (same major); e.g. 0.9 -> >=0.9.0,<0.10
+  # When ape's computed tag is a pre-release, lower bound includes e.g. 0.9.0a0

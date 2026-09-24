@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from release_train.tags import ReleaseChannel
 
 # Matches eth-ape pins with optional extras and various bound styles, e.g.:
 #   eth-ape>=0.8.25,<0.9
@@ -11,20 +15,22 @@ from dataclasses import dataclass
 #   eth-ape>=0.8.38,<1
 #   eth-ape[dev]>=0.8.0,<0.9
 #   "eth-ape>=0.8.25,<0.9"
+#   eth-ape>=0.9.0a0,<0.10
+_VERSION_CHUNK = r"[\d.]+(?:(?:a|b|rc|alpha|beta|c)\d+)?"
 _ETH_APE_PIN_RE = re.compile(
-    r"""
+    rf"""
     (?P<prefix>eth-ape(?:\[[^\]]*\])?)   # package + optional extras
     (?P<spec>
         \s*
         (?:
-            >=?\s*[\d.]+                 # lower bound (>= or >)
-            (?:\s*,\s*<?\s*[\d.]+)?      # optional upper bound
-          | ==\s*[\d.]+                  # exact pin
-          | ~=\s*[\d.]+                  # compatible release
+            >=?\s*{_VERSION_CHUNK}                 # lower bound (>= or >)
+            (?:\s*,\s*<?\s*{_VERSION_CHUNK})?      # optional upper bound
+          | ==\s*{_VERSION_CHUNK}                  # exact pin
+          | ~=\s*{_VERSION_CHUNK}                  # compatible release
         )
     )
     """,
-    re.VERBOSE,
+    re.VERBOSE | re.IGNORECASE,
 )
 
 
@@ -53,20 +59,35 @@ class MinorVersion:
         return f"v{self.major}.{self.minor}.{patch}"
 
     def pin_spec(self) -> str:
-        """Train policy pin: ``>=X.Y.0,<X.(Y+1)``."""
+        """Stable train policy pin: ``>=X.Y.0,<X.(Y+1)``."""
         return f">={self.major}.{self.minor}.0,<{self.major}.{self.next_minor}"
 
     def display(self) -> str:
         return f"{self.major}.{self.minor}"
 
 
-def format_eth_ape_pin(minor: MinorVersion, extras: str = "") -> str:
-    """Return the full requirement string for the train pin."""
+def format_eth_ape_pin(
+    minor: MinorVersion,
+    extras: str = "",
+    *,
+    channel: ReleaseChannel | None = None,
+) -> str:
+    """Return the full requirement string for the train pin.
+
+    When *channel* is provided (e.g. pre-release ape cut), use that pin spec
+    instead of the stable ``>=X.Y.0,<X.(Y+1)`` form.
+    """
     pkg = f"eth-ape{extras}" if extras else "eth-ape"
-    return f"{pkg}{minor.pin_spec()}"
+    spec = channel.pin_spec() if channel is not None else minor.pin_spec()
+    return f"{pkg}{spec}"
 
 
-def rewrite_eth_ape_pin(text: str, minor: MinorVersion) -> tuple[str, int]:
+def rewrite_eth_ape_pin(
+    text: str,
+    minor: MinorVersion,
+    *,
+    channel: ReleaseChannel | None = None,
+) -> tuple[str, int]:
     """Replace all ``eth-ape…`` pin specs in *text* with the train policy pin.
 
     Preserves extras (e.g. ``eth-ape[dev]``). Returns ``(new_text, n_replacements)``.
@@ -79,8 +100,8 @@ def rewrite_eth_ape_pin(text: str, minor: MinorVersion) -> tuple[str, int]:
         # prefix is eth-ape or eth-ape[...]
         if prefix.startswith("eth-ape["):
             extras = prefix[len("eth-ape") :]  # includes brackets
-            return format_eth_ape_pin(minor, extras=extras)
-        return format_eth_ape_pin(minor)
+            return format_eth_ape_pin(minor, extras=extras, channel=channel)
+        return format_eth_ape_pin(minor, channel=channel)
 
     new_text, n = _ETH_APE_PIN_RE.subn(_sub, text)
     return new_text, n

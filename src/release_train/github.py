@@ -8,6 +8,8 @@ import subprocess
 from dataclasses import dataclass
 from typing import Any
 
+from release_train.tags import pick_latest_semver
+
 
 class GhError(RuntimeError):
     """``gh`` invocation failed or is unavailable."""
@@ -46,7 +48,7 @@ def gh_api(endpoint: str, method: str = "GET") -> Any:
 
 
 def latest_release_tag(repo_full: str) -> str | None:
-    """Return the latest release tag name, or None if none / error."""
+    """Return the latest GitHub *release* tag name, or None if none / error."""
     try:
         result = run_gh(
             "release",
@@ -63,6 +65,33 @@ def latest_release_tag(repo_full: str) -> str | None:
         return data.get("tagName")
     except (GhError, json.JSONDecodeError):
         return None
+
+
+def list_tag_names(repo_full: str, *, limit: int = 100) -> list[str]:
+    """List tag names via ``gh api`` (newest-first from GitHub, not sorted)."""
+    # repos/{owner}/{repo}/tags returns [{name, ...}, ...]
+    try:
+        result = run_gh(
+            "api",
+            f"repos/{repo_full}/tags",
+            "--paginate",
+            check=False,
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            return []
+        data = json.loads(result.stdout)
+        if not isinstance(data, list):
+            return []
+        names = [t.get("name") for t in data if isinstance(t, dict) and t.get("name")]
+        return names[:limit] if limit else names
+    except (GhError, json.JSONDecodeError):
+        return []
+
+
+def latest_semver_tag(repo_full: str) -> str | None:
+    """Highest semver-ish tag on the repo (includes pre-releases), via gh."""
+    tags = list_tag_names(repo_full)
+    return pick_latest_semver(tags)
 
 
 def list_open_prs(repo_full: str, search: str | None = None) -> list[dict[str, Any]]:
