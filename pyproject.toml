@@ -13,7 +13,6 @@ authors = [{ name = "ApeWorX" }]
 dependencies = [
     "cyclopts>=3.0",
     "pyyaml>=6.0",
-    "tomlkit>=0.12",
 ]
 
 [project.scripts]
