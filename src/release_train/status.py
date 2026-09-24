@@ -1,11 +1,24 @@
-"""Status logic: latest tags, phases, and open prepare PRs for train members."""
+"""Status logic: latest tags, phases, and GitHub milestone progress."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from release_train.github import GhError, gh_available, latest_semver_tag, list_open_prs
+from release_train.github import (
+    GhError,
+    find_milestone,
+    gh_available,
+    latest_semver_tag,
+    list_open_prs_on_milestone,
+)
 from release_train.manifest import Manifest, RepoRef
+from release_train.milestones import (
+    LABEL_COMPAT,
+    LABEL_PINS,
+    MilestonePRCounts,
+    milestone_counts_from_payload,
+    milestone_title,
+)
 from release_train.pins import MinorVersion
 from release_train.tags import next_train_tag
 
@@ -37,6 +50,7 @@ class RepoStatus:
     latest_tag: str | None = None
     next_tag: str | None = None
     prepare_prs: list[dict] = field(default_factory=list)
+    milestone_counts: MilestonePRCounts | None = None
     error: str | None = None
 
     @property
@@ -54,6 +68,8 @@ class StatusReport:
     minor: MinorVersion | None
     offline: bool = False
     phases: tuple[tuple[str, str], ...] = TRAIN_PHASES
+    milestone: str | None = None
+    network_required_note: str | None = None
 
 
 def gather_status(
@@ -64,10 +80,15 @@ def gather_status(
 ) -> StatusReport:
     online = gh_available() and not skip_network
     items: list[RepoStatus] = []
+    ms_title = milestone_title(minor) if minor is not None else None
+    network_note: str | None = None
 
-    search = None
-    if minor is not None:
-        search = f"eth-ape {minor.display()} in:title"
+    if not online:
+        network_note = (
+            "Network required for milestone status "
+            f"({ms_title or 'release-train/{minor}'}). "
+            "Re-run without --offline when `gh` is authenticated."
+        )
 
     for member in manifest.all_members:
         full = member.full_name
@@ -82,25 +103,31 @@ def gather_status(
             st.latest_tag = latest_semver_tag(full)
             if minor is not None:
                 st.next_tag = next_train_tag(st.latest_tag, minor)
-            # Prefer title search related to prepare; fall back to broader "eth-ape"
-            if search:
-                prs = list_open_prs(full, search=search)
-            else:
-                prs = list_open_prs(full, search="eth-ape")
-            # Also catch our default PR title pattern without network search quirks
-            if not prs and minor is not None:
-                prs = [
-                    p
-                    for p in list_open_prs(full)
-                    if "eth-ape" in (p.get("title") or "").lower()
-                    or "release-train" in (p.get("headRefName") or "")
-                ]
-            st.prepare_prs = prs
+            # Milestone progress for plugins + extras (not core ape)
+            if ms_title is not None and member.role != "core":
+                ms = find_milestone(full, ms_title)
+                prs = list_open_prs_on_milestone(full, ms_title) if ms else []
+                # If milestone absent, still allow empty counts (found=False)
+                if ms is None:
+                    # Also try listing in case milestone exists but find failed oddly
+                    prs = list_open_prs_on_milestone(full, ms_title)
+                st.milestone_counts = milestone_counts_from_payload(
+                    milestone=ms, open_prs=prs, title=ms_title
+                )
+                st.prepare_prs = prs
+            elif ms_title is None and member.role != "core":
+                st.error = "pass --minor to query milestone progress"
         except GhError as exc:
             st.error = str(exc)
         items.append(st)
 
-    return StatusReport(items=items, minor=minor, offline=not online)
+    return StatusReport(
+        items=items,
+        minor=minor,
+        offline=not online,
+        milestone=ms_title,
+        network_required_note=network_note,
+    )
 
 
 def format_status_report(report: StatusReport) -> str:
@@ -112,6 +139,15 @@ def format_status_report(report: StatusReport) -> str:
     lines.append(header)
     if report.offline:
         lines.append("(offline / no gh — listing train members only)")
+        if report.network_required_note:
+            lines.append(report.network_required_note)
+    elif report.milestone:
+        lines.append(
+            f"Milestone: `{report.milestone}`  |  labels: `{LABEL_PINS}` / `{LABEL_COMPAT}`"
+        )
+        lines.append("State lives on GitHub (no local train-status files).")
+    else:
+        lines.append("Tip: pass --minor X.Y to query per-repo milestone progress.")
     lines.append("")
 
     lines.append("Train phases (minor lifecycle):")
@@ -131,11 +167,35 @@ def format_status_report(report: StatusReport) -> str:
         if st.error and report.offline:
             pass  # already noted globally
         elif st.error:
-            lines.append(f"  error: {st.error}")
-        if st.prepare_prs:
+            lines.append(f"  note: {st.error}")
+        counts = st.milestone_counts
+        if counts is not None:
+            due = f" / due {counts.due_on}" if counts.due_on else ""
+            presence = "present" if counts.found else "absent"
+            lines.append(f"  milestone: {counts.milestone_title or report.milestone} ({presence})")
+            lines.append(
+                f"  progress: pins open {counts.pins_open} / compat open {counts.compat_open}{due}"
+            )
+            if counts.other_open:
+                lines.append(f"  other open on milestone: {counts.other_open}")
             for pr in st.prepare_prs:
-                lines.append(f"  open PR #{pr.get('number')}: {pr.get('title')} ({pr.get('url')})")
-        elif not report.offline and not st.error and st.member.role != "core":
-            lines.append("  open prepare PRs: none detected")
+                labels = pr.get("labels") or []
+                label_names = []
+                for lab in labels:
+                    if isinstance(lab, dict) and lab.get("name"):
+                        label_names.append(str(lab["name"]))
+                    elif isinstance(lab, str):
+                        label_names.append(lab)
+                lab_s = ",".join(label_names) if label_names else "—"
+                lines.append(
+                    f"  open PR #{pr.get('number')}: {pr.get('title')} [{lab_s}] ({pr.get('url')})"
+                )
+        elif (
+            not report.offline
+            and not st.error
+            and st.member.role != "core"
+            and report.milestone is None
+        ):
+            lines.append("  milestone progress: (need --minor)")
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"

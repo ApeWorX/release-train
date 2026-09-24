@@ -39,6 +39,7 @@ def plan(
     """Print the full multi-phase train sequence (always a plan; never mutates).
 
     Phases: prepare-pins → cut-ape → compat → cut-plugins.
+    State lives in per-repo GitHub milestones + labels (not local files).
     """
     try:
         mf = load_manifest(manifest)
@@ -56,7 +57,10 @@ def prepare(
         bool,
         Parameter(
             name="--apply",
-            help="Print/execute apply path (partial PR automation in v1). Default: plan only.",
+            help=(
+                "Ensure milestones/labels via gh; print PR recipes "
+                "(partial in v1). Default: plan only."
+            ),
         ),
     ] = False,
     manifest: Annotated[
@@ -82,7 +86,10 @@ def prepare(
 def status(
     minor: Annotated[
         str | None,
-        Parameter(name="--minor", help="Optional minor to filter prepare PR search"),
+        Parameter(
+            name="--minor",
+            help="Train minor for milestone progress (required for gate view)",
+        ),
     ] = None,
     manifest: Annotated[
         Path | None,
@@ -93,7 +100,7 @@ def status(
         Parameter(name="--offline", help="Skip gh network calls"),
     ] = False,
 ) -> None:
-    """Show phases, latest tags, and open prepare PRs for train members."""
+    """Show phases, tags, and per-repo milestone progress (pins/compat open counts)."""
     try:
         mf = load_manifest(manifest)
     except ManifestError as exc:
@@ -111,8 +118,8 @@ def cut(
             name="--target",
             help=(
                 "What to release: ape | plugins | all. "
-                "For plugins: ensure prepare-pins are merged and compat PRs "
-                "(breaking fixes after ape is on PyPI) have landed before --apply."
+                "For plugins: refuses --apply if any member has open "
+                "release-train/compat PRs on the train milestone."
             ),
         ),
     ],
@@ -135,8 +142,8 @@ def cut(
 ) -> None:
     """Create GitHub Releases with --generate-notes (ape first, then plugins).
 
-    Default is a plan. Pass --apply to execute. Plugin cuts should wait for the
-    compat phase when breaking API fixes are required after ape lands on PyPI.
+    Default is a plan. Pass --apply to execute. Plugin cuts are gated on the
+    per-repo milestone: open ``release-train/compat`` PRs refuse --apply.
     """
     try:
         mf = load_manifest(manifest)
@@ -145,3 +152,5 @@ def cut(
     mv = _resolve_minor(minor)
     result = plan_cut(mf, mv, target, apply=apply, skip_network=offline)
     print(format_cut_report(result))
+    if result.blocked:
+        raise SystemExit(1)
