@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "release-train"
+version = "0.1.0"
+description = "CLI to orchestrate coordinated minor releases of ape (eth-ape) and official ApeWorX plugins"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "ApeWorX" }]
+dependencies = [
+    "cyclopts>=3.0",
+    "pyyaml>=6.0",
+    "tomlkit>=0.12",
+]
+
+[project.scripts]
+release-train = "release_train.__main__:app"
+
+[project.optional-dependencies]
+# kept empty; use dependency-groups below
+
+[dependency-groups]
+test = ["pytest>=8.0"]
+style = ["ruff>=0.6"]
+dev = [{ include-group = "test" }, { include-group = "style" }]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+release_train = ["py.typed"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

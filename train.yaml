@@ -1,0 +1,58 @@
+# ApeWorX minor release-train manifest
+#
+# Version policy:
+#   - Plugin major.minor tracks ape (eth-ape) major.minor
+#   - Patches float independently
+#   - Plugins pin: eth-ape>=X.Y.0,<X.(Y+1)
+#   - Example for minor 0.9: eth-ape>=0.9.0,<0.10
+#
+# Core package on PyPI is "eth-ape"; GitHub repo is ApeWorX/ape.
+# Releases are cut via GitHub Releases (--generate-notes). PyPI publish
+# is handled by each repo's existing publish.yaml on release: released.
+
+org: ApeWorX
+
+core:
+  repo: ape
+  package: eth-ape
+  # ape uses setuptools_scm; bump fallback_version in pyproject.toml when cutting a minor
+
+plugins:
+  - ape-addressbook
+  - ape-alchemy
+  - ape-arbitrum
+  - ape-avalanche
+  - ape-aws
+  - ape-base
+  - ape-blast
+  - ape-blockscout
+  - ape-bsc
+  - ape-chainstack
+  - ape-drpc
+  - ape-ens
+  - ape-erpc
+  - ape-etherscan
+  - ape-fantom
+  - ape-farcaster
+  - ape-flashbots
+  - ape-foundry
+  - ape-hardhat
+  - ape-hyperliquid
+  - ape-infura
+  - ape-ledger
+  - ape-notebook
+  - ape-optimism
+  - ape-polygon
+  - ape-safe
+  - ape-solidity
+  - ape-sonic
+  - ape-sourcify
+  - ape-tenderly
+  - ape-titanoboa
+  - ape-tokens
+  - ape-trezor
+  - ape-vyper
+
+policy:
+  pin_pattern: "eth-ape>={major}.{minor}.0,<{major}.{next_minor}"
+  # next_minor = minor + 1 (same major); e.g. 0.9 -> >=0.9.0,<0.10
